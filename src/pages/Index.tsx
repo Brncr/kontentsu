@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { NewsList, type NewsItem } from "@/components/NewsList";
 import { ScriptPanel } from "@/components/ScriptPanel";
@@ -13,6 +13,11 @@ const Index = () => {
   const [mobileTab, setMobileTab] = useState<"news" | "script">("news");
   const [currentNiche, setCurrentNiche] = useState<string>("");
   const [currentSource, setCurrentSource] = useState<string>("");
+  const [newsStep, setNewsStep] = useState<string>("niche");
+
+  // Compute active flow step: niche=1, source=2, news=3, script generated=4
+  const handleNewsStepChange = useCallback((step: string) => setNewsStep(step), []);
+  const activeFlowStep = selectedNews ? 3 : newsStep === "niche" ? 0 : newsStep === "source" ? 1 : 2;
   const { lang, setLang } = useLang();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -157,13 +162,17 @@ const Index = () => {
               { step: "2", label: lang === "en" ? "news source" : lang === "es" ? "fuente periodística" : "fonte jornalística" },
               { step: "3", label: lang === "en" ? "pick the news" : lang === "es" ? "elige la noticia" : "escolha a notícia" },
               { step: "4", label: lang === "en" ? "script ready!" : lang === "es" ? "¡guión listo!" : "roteiro pronto!" },
-            ].map((item, i) => (
+            ].map((item, i) => {
+              const isActive = i === activeFlowStep;
+              const isPast = i < activeFlowStep;
+              return (
               <div key={item.step} className="flex items-center gap-2 sm:gap-4">
                 <div
                   className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all"
                   style={{
-                    background: i === 3 ? "hsl(var(--primary) / 0.08)" : "hsl(var(--muted) / 0.3)",
-                    border: i === 3 ? "1px solid hsl(var(--primary) / 0.3)" : "1px solid hsl(var(--border))",
+                    background: isActive ? "hsl(var(--primary) / 0.08)" : "hsl(var(--muted) / 0.3)",
+                    border: isActive ? "1px solid hsl(var(--primary) / 0.3)" : "1px solid hsl(var(--border))",
+                    opacity: isPast ? 0.5 : 1,
                     minWidth: 100,
                   }}
                 >
@@ -171,17 +180,17 @@ const Index = () => {
                     className="text-lg font-black"
                     style={{
                       fontFamily: "var(--font-display)",
-                      color: i === 3 ? "hsl(var(--primary))" : "hsl(var(--foreground))",
+                      color: isActive ? "hsl(var(--primary))" : isPast ? "hsl(var(--primary) / 0.6)" : "hsl(var(--foreground))",
                       lineHeight: 1,
-                      textShadow: i === 3 ? "0 0 16px hsl(var(--primary) / 0.5)" : undefined,
+                      textShadow: isActive ? "0 0 16px hsl(var(--primary) / 0.5)" : undefined,
                     }}
                   >
-                    {item.step}
+                    {isPast ? "✓" : item.step}
                   </span>
                   <span
                     className="text-[9px] uppercase tracking-wider text-center"
                     style={{
-                      color: i === 3 ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
+                      color: isActive ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
                       fontFamily: "var(--font-sub)",
                     }}
                   >
@@ -189,10 +198,11 @@ const Index = () => {
                   </span>
                 </div>
                 {i < 3 && (
-                  <span className="text-[10px] font-bold" style={{ color: "hsl(var(--muted-foreground) / 0.4)" }}>»</span>
+                  <span className="text-[10px] font-bold" style={{ color: isPast ? "hsl(var(--primary) / 0.4)" : "hsl(var(--muted-foreground) / 0.4)" }}>»</span>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -249,7 +259,7 @@ const Index = () => {
             <div className="rounded-2xl overflow-hidden" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", boxShadow: "0 4px 48px hsl(230 25% 2% / 0.7)" }}>
               <div className="h-px w-full" style={{ background: "linear-gradient(90deg, transparent, hsl(var(--primary) / 0.25), transparent)" }} />
               <div className="p-4 sm:p-5">
-                <NewsList onSelectNews={handleSelectNews} selectedUrl={selectedNews?.url ?? null} />
+                <NewsList onSelectNews={handleSelectNews} selectedUrl={selectedNews?.url ?? null} onStepChange={handleNewsStepChange} />
               </div>
             </div>
           </div>

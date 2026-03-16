@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -51,6 +51,7 @@ export interface NewsItem {
 interface NewsListProps {
   onSelectNews: (item: NewsItem) => void;
   selectedUrl: string | null;
+  onStepChange?: (step: string) => void;
 }
 
 const SOURCES = [
@@ -123,7 +124,7 @@ function SourceLogo({ src, size = "md" }: { src: SourceItem; size?: "sm" | "md" 
   );
 }
 
-export function NewsList({ onSelectNews, selectedUrl }: NewsListProps) {
+export function NewsList({ onSelectNews, selectedUrl, onStepChange }: NewsListProps) {
   const [step, setStep] = useState<Step>("niche");
   const [selectedNiche, setSelectedNiche] = useState<Niche | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
@@ -131,6 +132,11 @@ export function NewsList({ onSelectNews, selectedUrl }: NewsListProps) {
   const [loadingSource, setLoadingSource] = useState<string | null>(null);
   const { toast } = useToast();
   const { lang } = useLang();
+
+  // Notify parent of step changes
+  useEffect(() => {
+    onStepChange?.(step);
+  }, [step, onStepChange]);
 
   const nicheSources = selectedNiche ? SOURCES.filter((s) => s.niche === selectedNiche) : [];
   const activeSrc = SOURCES.find((s) => s.name === activeSource) as SourceItem | undefined;
