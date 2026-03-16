@@ -1,0 +1,10 @@
+project_id = "amdpmqrnvxyqtguzvsfx"
+
+[functions.scrape-news]
+verify_jwt = false
+
+[functions.generate-script]
+verify_jwt = false
+
+[functions.generate-tweet]
+verify_jwt = false
