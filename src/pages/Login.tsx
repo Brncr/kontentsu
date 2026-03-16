@@ -15,6 +15,16 @@ const Login = () => {
 
   return (
     <div className="min-h-screen bg-background relative overflow-hidden flex items-center justify-center">
+      {/* Background brand image */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundImage: "url('/hero-bg.jpg')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          opacity: 0.12,
+        }}
+      />
       {/* Background glow effects */}
       <div
         className="absolute inset-0 pointer-events-none"
