@@ -125,8 +125,18 @@ const Index = () => {
       </header>
 
       {/* ── Hero strip ───────────────────────────────────────── */}
-      <div className="relative overflow-hidden" style={{ background: "linear-gradient(180deg, hsl(228 22% 7%) 0%, hsl(230 25% 4%) 100%)", borderBottom: "1px solid hsl(var(--border))" }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-8 py-4 sm:py-6 flex items-center justify-between gap-4">
+      <div className="relative overflow-hidden" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
+        {/* Background image */}
+        <div className="absolute inset-0" style={{
+          backgroundImage: "url('/hero-bg.jpg')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          opacity: 0.15,
+        }} />
+        {/* Dark overlay */}
+        <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, hsl(228 22% 7% / 0.85) 0%, hsl(230 25% 4% / 0.95) 100%)" }} />
+        
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-8 py-4 sm:py-6 flex items-center justify-between gap-4">
           <div>
             <p className="text-[10px] uppercase tracking-[0.2em] mb-1" style={{ color: "hsl(var(--primary))", fontFamily: "var(--font-sub)" }}>
               {tr("hero_sub", lang)}
@@ -143,7 +153,7 @@ const Index = () => {
               { label: tr("stat_sources", lang), value: "25+" },
               { label: tr("stat_niches", lang), value: "3" },
             ].map((s) => (
-              <div key={s.label} className="text-center px-4 py-2.5 rounded-xl" style={{ background: "hsl(var(--muted) / 0.5)", border: "1px solid hsl(var(--border))" }}>
+              <div key={s.label} className="text-center px-4 py-2.5 rounded-xl" style={{ background: "hsl(var(--muted) / 0.5)", border: "1px solid hsl(var(--border))", backdropFilter: "blur(8px)" }}>
                 <p className="text-lg font-black" style={{ fontFamily: "var(--font-display)", color: "hsl(var(--primary))", lineHeight: 1 }}>{s.value}</p>
                 <p className="text-[10px] uppercase tracking-widest mt-0.5" style={{ color: "hsl(var(--muted-foreground))", fontFamily: "var(--font-sub)" }}>{s.label}</p>
               </div>
