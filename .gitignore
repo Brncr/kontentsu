@@ -34,3 +34,5 @@ supabase/.temp
 
 # Build info
 *.tsbuildinfo
+
+.vercel

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -27,6 +27,11 @@ interface TweetResult {
   tweets: string[];
 }
 
+interface CachedResult {
+  script: Script | null;
+  tweetResult: TweetResult | null;
+}
+
 export function ScriptPanel({ selectedNews, onGoToNews, niche, newsSource }: ScriptPanelProps) {
   const [script, setScript] = useState<Script | null>(null);
   const [tweetResult, setTweetResult] = useState<TweetResult | null>(null);
@@ -35,6 +40,37 @@ export function ScriptPanel({ selectedNews, onGoToNews, niche, newsSource }: Scr
   const [copied, setCopied] = useState<string | null>(null);
   const { toast } = useToast();
   const { lang } = useLang();
+
+  // Cache generated scripts/tweets per news URL
+  const cacheRef = useRef<Map<string, CachedResult>>(new Map());
+  const prevUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const newUrl = selectedNews?.url ?? null;
+    const oldUrl = prevUrlRef.current;
+
+    // Save current results to cache before switching
+    if (oldUrl && oldUrl !== newUrl) {
+      cacheRef.current.set(oldUrl, { script, tweetResult });
+    }
+
+    // Load cached results for the new news, or clear
+    if (newUrl && newUrl !== oldUrl) {
+      const cached = cacheRef.current.get(newUrl);
+      if (cached) {
+        setScript(cached.script);
+        setTweetResult(cached.tweetResult);
+      } else {
+        setScript(null);
+        setTweetResult(null);
+      }
+    } else if (!newUrl) {
+      setScript(null);
+      setTweetResult(null);
+    }
+
+    prevUrlRef.current = newUrl;
+  }, [selectedNews?.url]);
 
   const saveScriptToHistory = async (scriptData: Script, newsItem: NewsItem) => {
     try {
