@@ -58,41 +58,23 @@ Deno.serve(async (req) => {
     const { data: { users }, error: usersError } = await adminClient.auth.admin.listUsers({ perPage: 1000 });
     if (usersError) throw usersError;
 
-    // 2. Get all saved_scripts with full content
+    // 2. Get all saved_scripts
     const { data: scripts, error: scriptsError } = await adminClient
       .from('saved_scripts')
-      .select('id, user_id, niche, script_type, created_at, news_source, news_title, news_url, script_title, script_hook, script_dev, script_cta, script_hashtags, tweet_content, is_favorite')
+      .select('id, user_id, niche, script_type, created_at, news_source, news_title, script_hashtags')
       .order('created_at', { ascending: false });
     if (scriptsError) throw scriptsError;
 
-    // 3. Build per-user stats
-    const userStats = users.map((u: any) => {
-      const userScripts = (scripts || []).filter((s: any) => s.user_id === u.id);
-      const scriptCount = userScripts.filter((s: any) => s.script_type === 'script').length;
-      const tweetCount = userScripts.filter((s: any) => s.script_type === 'tweet').length;
-      const niches = [...new Set(userScripts.map((s: any) => s.niche).filter(Boolean))];
-      const sources = [...new Set(userScripts.map((s: any) => s.news_source).filter(Boolean))];
-      const lastUse = userScripts.length > 0
-        ? userScripts.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0].created_at
-        : null;
+    const allScripts = scripts || [];
 
-      // Build content items for this user
-      const contentItems = userScripts.map((s: any) => ({
-        id: s.id,
-        type: s.script_type,
-        newsTitle: s.news_title,
-        newsUrl: s.news_url,
-        newsSource: s.news_source,
-        niche: s.niche,
-        scriptTitle: s.script_title,
-        scriptHook: s.script_hook,
-        scriptDev: s.script_dev,
-        scriptCta: s.script_cta,
-        scriptHashtags: s.script_hashtags || [],
-        tweetContent: s.tweet_content,
-        isFavorite: s.is_favorite,
-        createdAt: s.created_at,
-      }));
+    // ── 3. Per-user stats (lean — no raw content) ──
+    const userStats = users.map((u: any) => {
+      const us = allScripts.filter((s: any) => s.user_id === u.id);
+      const scriptCount = us.filter((s: any) => s.script_type === 'script').length;
+      const tweetCount = us.filter((s: any) => s.script_type === 'tweet').length;
+      const niches = [...new Set(us.map((s: any) => s.niche).filter(Boolean))];
+      const sources = [...new Set(us.map((s: any) => s.news_source).filter(Boolean))];
+      const lastUse = us.length > 0 ? us[0].created_at : null;
 
       return {
         id: u.id,
@@ -107,28 +89,61 @@ Deno.serve(async (req) => {
         niches,
         sources,
         lastUse,
-        scripts: contentItems,
       };
     });
+    userStats.sort((a: any, b: any) => b.totalGenerated - a.totalGenerated);
 
-    userStats.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-    // 4. Build KPIs
+    // ── 4. KPIs ──
     const totalUsers = users.length;
-    const totalScripts = (scripts || []).filter((s: any) => s.script_type === 'script').length;
-    const totalTweets = (scripts || []).filter((s: any) => s.script_type === 'tweet').length;
+    const totalScripts = allScripts.filter((s: any) => s.script_type === 'script').length;
+    const totalTweets = allScripts.filter((s: any) => s.script_type === 'tweet').length;
     const totalGenerated = totalScripts + totalTweets;
     const activeUsers = userStats.filter((u: any) => u.totalGenerated > 0).length;
     const avgPerUser = totalUsers > 0 ? Math.round((totalGenerated / totalUsers) * 10) / 10 : 0;
 
+    // ── 5. Analytics Intelligence ──
+
+    // 5a. Niche breakdown
     const nicheBreakdown: Record<string, number> = {};
-    (scripts || []).forEach((s: any) => {
+    allScripts.forEach((s: any) => {
       if (s.niche) nicheBreakdown[s.niche] = (nicheBreakdown[s.niche] || 0) + 1;
     });
 
+    // 5b. Top sources (ranked by usage)
+    const sourceCount: Record<string, number> = {};
+    allScripts.forEach((s: any) => {
+      if (s.news_source) sourceCount[s.news_source] = (sourceCount[s.news_source] || 0) + 1;
+    });
+    const topSources = Object.entries(sourceCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 15)
+      .map(([name, count]) => ({ name, count }));
+
+    // 5c. Source per niche
+    const sourcesByNiche: Record<string, Record<string, number>> = {};
+    allScripts.forEach((s: any) => {
+      if (s.niche && s.news_source) {
+        if (!sourcesByNiche[s.niche]) sourcesByNiche[s.niche] = {};
+        sourcesByNiche[s.niche][s.news_source] = (sourcesByNiche[s.niche][s.news_source] || 0) + 1;
+      }
+    });
+
+    // 5d. Daily content generation (last 30 days)
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const dailyContent: Record<string, { scripts: number; tweets: number }> = {};
     const dailySignups: Record<string, number> = {};
+
+    allScripts.forEach((s: any) => {
+      const d = new Date(s.created_at);
+      if (d >= thirtyDaysAgo) {
+        const key = d.toISOString().slice(0, 10);
+        if (!dailyContent[key]) dailyContent[key] = { scripts: 0, tweets: 0 };
+        if (s.script_type === 'script') dailyContent[key].scripts++;
+        else dailyContent[key].tweets++;
+      }
+    });
+
     users.forEach((u: any) => {
       const d = new Date(u.created_at);
       if (d >= thirtyDaysAgo) {
@@ -137,10 +152,74 @@ Deno.serve(async (req) => {
       }
     });
 
+    // 5e. Peak usage hours
+    const hourlyUsage: number[] = new Array(24).fill(0);
+    allScripts.forEach((s: any) => {
+      const h = new Date(s.created_at).getHours();
+      hourlyUsage[h]++;
+    });
+
+    // 5f. Top hashtags
+    const hashtagCount: Record<string, number> = {};
+    allScripts.forEach((s: any) => {
+      if (s.script_hashtags && Array.isArray(s.script_hashtags)) {
+        s.script_hashtags.forEach((tag: string) => {
+          const clean = tag.replace(/^#/, '').toLowerCase();
+          if (clean) hashtagCount[clean] = (hashtagCount[clean] || 0) + 1;
+        });
+      }
+    });
+    const topHashtags = Object.entries(hashtagCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([tag, count]) => ({ tag, count }));
+
+    // 5g. Top topics (extract keywords from news titles)
+    const stopWords = new Set(['de','do','da','dos','das','e','a','o','um','uma','para','com','em','no','na','nos','nas','por','se','que','é','ao','os','as','mais','como','sobre','the','and','of','to','in','for','is','on','with','by','at','an','from','its','new','has','are','will','be','it','was','not','this','but','or','have','had','been','can','than','all','their','after','into','out','up','one','may','could','first','also','two','been','now','just','over','back','if','our','us','his','her','she','he','my','me','we','they','them','no','so','any','what','which','when','who','would','there','each','make','how','other','can']);
+    const wordCount: Record<string, number> = {};
+    allScripts.forEach((s: any) => {
+      if (s.news_title) {
+        const words = s.news_title.toLowerCase()
+          .replace(/[^a-záàâãéèêíïóôõöúüçñ\s]/gi, '')
+          .split(/\s+/)
+          .filter((w: string) => w.length > 3 && !stopWords.has(w));
+        words.forEach((w: string) => {
+          wordCount[w] = (wordCount[w] || 0) + 1;
+        });
+      }
+    });
+    const topTopics = Object.entries(wordCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 25)
+      .map(([word, count]) => ({ word, count }));
+
+    // 5h. Recent activity (last 10 items — summary only)
+    const recentActivity = allScripts.slice(0, 10).map((s: any) => {
+      const user = users.find((u: any) => u.id === s.user_id);
+      return {
+        type: s.script_type,
+        niche: s.niche,
+        newsTitle: s.news_title,
+        newsSource: s.news_source,
+        userName: user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || 'Anônimo',
+        userAvatar: user?.user_metadata?.avatar_url || user?.user_metadata?.picture || null,
+        createdAt: s.created_at,
+      };
+    });
+
     return new Response(
       JSON.stringify({
         success: true,
         kpis: { totalUsers, activeUsers, totalScripts, totalTweets, totalGenerated, avgPerUser, nicheBreakdown, dailySignups },
+        analytics: {
+          topSources,
+          sourcesByNiche,
+          dailyContent,
+          hourlyUsage,
+          topHashtags,
+          topTopics,
+          recentActivity,
+        },
         users: userStats,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
