@@ -273,6 +273,16 @@ export const t = {
     en: "0 news found — the site may be blocking scraping. Try again or choose another source.",
     es: "0 noticias encontradas — el sitio puede estar bloqueando el scraping. Intenta de nuevo o elige otra fuente.",
   },
+  toast_cache_hit: {
+    pt: "Cache — carregado há",
+    en: "Cache — loaded",
+    es: "Cache — cargado hace",
+  },
+  toast_cache_min_ago: {
+    pt: "min",
+    en: "min ago",
+    es: "min",
+  },
   // ── Footer ───────────────────────────────────────────────
   footer_powered: {
     pt: "Kontentsu · Powered by Firecrawl + Gemini AI",

@@ -3,6 +3,50 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
+// ── In-memory cache (persists while Edge Function instance is warm) ──
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const newsCache = new Map<string, { data: unknown[]; timestamp: number }>();
+
+// ── Fetch with retry + exponential backoff for 429 ──────────────────
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  maxRetries = 3,
+  label = 'fetch'
+): Promise<Response> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const res = await fetch(url, options);
+    if (res.status === 429) {
+      const waitMs = Math.pow(2, attempt + 1) * 1000; // 2s, 4s, 8s
+      console.warn(`⚠️ 429 rate-limited on ${label}, retrying in ${waitMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+      await new Promise(r => setTimeout(r, waitMs));
+      continue;
+    }
+    return res;
+  }
+  // Final attempt without retry
+  return fetch(url, options);
+}
+
+// ── Batch helper: process items in chunks with delay ────────────────
+async function batchProcess<T, R>(
+  items: T[],
+  fn: (item: T) => Promise<R>,
+  batchSize = 3,
+  delayMs = 500
+): Promise<R[]> {
+  const results: R[] = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map(fn));
+    results.push(...batchResults);
+    if (i + batchSize < items.length) {
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+  return results;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -19,6 +63,21 @@ Deno.serve(async (req) => {
         JSON.stringify({ success: false, error: 'FIRECRAWL_API_KEY não configurada' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // ── Check in-memory cache ────────────────────────────────────────
+    const forceRefresh = body.forceRefresh === true;
+    if (requestedSource && !forceRefresh) {
+      const cacheKey = `${requestedSource}_${lang}`;
+      const cached = newsCache.get(cacheKey);
+      if (cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
+        const ageMin = Math.round((Date.now() - cached.timestamp) / 60000);
+        console.log(`✅ Cache hit for ${cacheKey} (${ageMin}min old, ${cached.data.length} items)`);
+        return new Response(
+          JSON.stringify({ success: true, news: cached.data, cached: true, cacheAgeMin: ageMin }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     type Source = { url: string; filter: (l: string) => boolean; name: string; sort?: (l: string[]) => string[]; limit?: number; mapSearch?: string; useScrapLinks?: boolean; useSearch?: string; useSearchWithContent?: boolean; sourceLang?: string; };
@@ -449,7 +508,7 @@ Deno.serve(async (req) => {
         try {
           // ── useSearchWithContent: search returns inline markdown, skip per-article scrape ──
           if (source.useSearchWithContent && source.useSearch) {
-            const res = await fetch('https://api.firecrawl.dev/v1/search', {
+            const res = await fetchWithRetry('https://api.firecrawl.dev/v1/search', {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -458,7 +517,7 @@ Deno.serve(async (req) => {
                 tbs: 'qdr:m',
                 scrapeOptions: { formats: ['markdown'] },
               }),
-            });
+            }, 3, `search+content:${source.name}`);
             const data = await res.json();
             if (!res.ok) { console.warn(`Search+content failed for ${source.name}:`, data.error); return []; }
             const results: Array<{ url: string; title?: string; description?: string; markdown?: string }> = data.data || data.results || [];
@@ -479,7 +538,7 @@ Deno.serve(async (req) => {
 
           if (source.useSearch) {
             // Use Firecrawl Search API for JS-heavy/blocked sites
-            const res = await fetch('https://api.firecrawl.dev/v1/search', {
+            const res = await fetchWithRetry('https://api.firecrawl.dev/v1/search', {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -487,7 +546,7 @@ Deno.serve(async (req) => {
                 limit: source.limit ?? 10,
                 tbs: 'qdr:m', // Last month
               }),
-            });
+            }, 3, `search:${source.name}`);
             const data = await res.json();
             if (!res.ok) { console.warn(`Search failed for ${source.name}:`, data.error); return []; }
             const results = data.data || data.results || [];
@@ -495,17 +554,17 @@ Deno.serve(async (req) => {
             console.log(`${source.name} search results count: ${allLinks.length}`);
           } else if (source.useScrapLinks) {
             // Use scrape+links for sources where map returns stale index
-            const res = await fetch('https://api.firecrawl.dev/v1/scrape', {
+            const res = await fetchWithRetry('https://api.firecrawl.dev/v1/scrape', {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
               body: JSON.stringify({ url: source.url, formats: ['links'], onlyMainContent: false }),
-            });
+            }, 3, `scrape-links:${source.name}`);
             const data = await res.json();
             if (!res.ok) { console.warn(`Scrape-links failed for ${source.url}:`, data.error); return []; }
             allLinks = (data.data?.links || data.links || []) as string[];
             console.log(`${source.name} scraped links count: ${allLinks.length}`);
           } else {
-            const res = await fetch('https://api.firecrawl.dev/v1/map', {
+            const res = await fetchWithRetry('https://api.firecrawl.dev/v1/map', {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -514,7 +573,7 @@ Deno.serve(async (req) => {
                 includeSubdomains: false,
                 ...(source.mapSearch ? { search: source.mapSearch } : {}),
               }),
-            });
+            }, 3, `map:${source.name}`);
             const data = await res.json();
             if (!res.ok) { console.warn(`Map failed for ${source.url}:`, data.error); return []; }
             allLinks = data.links || [];
@@ -544,8 +603,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Step 2: Scrape each article in parallel
-    const scrapePromises = articleEntries.map(async ({ url, source, sourceLang, prefetched }) => {
+    // Step 2: Scrape articles in batches of 3 (reduces burst pressure)
+    const scrapeArticle = async ({ url, source, sourceLang, prefetched }: typeof articleEntries[number]) => {
       try {
         let markdown = '';
         let rawHtml = '';
@@ -566,7 +625,7 @@ Deno.serve(async (req) => {
         }
 
         console.log(`Scraping: ${url}`);
-        const res = await fetch('https://api.firecrawl.dev/v1/scrape', {
+        const res = await fetchWithRetry('https://api.firecrawl.dev/v1/scrape', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -575,7 +634,7 @@ Deno.serve(async (req) => {
             onlyMainContent: false,
             timeout: 30000,
           }),
-        });
+        }, 3, `scrape:${url}`);
 
         const data = await res.json();
         if (!res.ok || !data.success) {
@@ -672,9 +731,9 @@ Deno.serve(async (req) => {
         console.warn(`Error scraping ${url}:`, err);
         return null;
       }
-    });
+    };
 
-    const results = await Promise.all(scrapePromises);
+    const results = await batchProcess(articleEntries, scrapeArticle, 3, 500);
     const newsItems = results.filter(Boolean);
 
     console.log(`Successfully scraped ${newsItems.length} articles`);
@@ -686,8 +745,15 @@ Deno.serve(async (req) => {
       return new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime();
     });
 
+    // ── Store in cache ──────────────────────────────────────────────
+    if (requestedSource) {
+      const cacheKey = `${requestedSource}_${lang}`;
+      newsCache.set(cacheKey, { data: newsItems, timestamp: Date.now() });
+      console.log(`💾 Cached ${newsItems.length} items for ${cacheKey}`);
+    }
+
     return new Response(
-      JSON.stringify({ success: true, news: newsItems }),
+      JSON.stringify({ success: true, news: newsItems, cached: false }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 

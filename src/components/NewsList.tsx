@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -170,11 +170,38 @@ export function NewsList({ onSelectNews, selectedUrl, onStepChange }: NewsListPr
     setStep("source");
   };
 
-  const fetchSource = async (sourceName: string) => {
+  // ── Client-side session cache (15min TTL) ──────────────────
+  const CLIENT_CACHE_TTL = 15 * 60 * 1000;
+  const cacheRef = useRef<Map<string, { news: NewsItem[]; fetchedAt: number }>>(new Map());
+  const [cooldownUntil, setCooldownUntil] = useState<number>(0);
+  const cooldownActive = Date.now() < cooldownUntil;
+
+  // Tick to clear cooldown visual
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!cooldownActive) return;
+    const id = setInterval(() => setTick(t => t + 1), 500);
+    return () => clearInterval(id);
+  }, [cooldownActive]);
+
+  const fetchSource = async (sourceName: string, forceRefresh = false) => {
+    // Check client cache first
+    if (!forceRefresh) {
+      const cached = cacheRef.current.get(`${sourceName}_${lang}`);
+      if (cached && (Date.now() - cached.fetchedAt) < CLIENT_CACHE_TTL) {
+        const ageMin = Math.round((Date.now() - cached.fetchedAt) / 60000);
+        setNews(cached.news);
+        setActiveSource(sourceName);
+        setStep("news");
+        toast({ title: `📦 ${sourceName}`, description: `${cached.news.length} ${tr("news_count", lang)} · ${tr("toast_cache_hit", lang)} ${ageMin} ${tr("toast_cache_min_ago", lang)}` });
+        return;
+      }
+    }
+
     setLoadingSource(sourceName);
     try {
       const { data, error } = await supabase.functions.invoke("scrape-news", {
-        body: { source: sourceName, lang },
+        body: { source: sourceName, lang, forceRefresh },
       });
       if (error) throw error;
       if (!data.success) throw new Error(data.error || tr("toast_error_news", lang));
@@ -184,18 +211,26 @@ export function NewsList({ onSelectNews, selectedUrl, onStepChange }: NewsListPr
         if (!b.publishedDate) return -1;
         return new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime();
       });
+
+      // Store in client cache
+      cacheRef.current.set(`${sourceName}_${lang}`, { news: incoming, fetchedAt: Date.now() });
+
       setNews(incoming);
       setActiveSource(sourceName);
       setStep("news");
+
+      // Start cooldown (5 seconds)
+      setCooldownUntil(Date.now() + 5000);
+
       if (incoming.length === 0) {
-        // Possible firewall/block — show warning toast
         toast({
           title: `⚠️ ${sourceName}`,
           description: tr("toast_blocked_warning", lang),
           variant: "destructive",
         });
       } else {
-        toast({ title: `✅ ${sourceName}`, description: `${incoming.length} ${tr("news_count", lang)}` });
+        const cacheNote = data.cached ? ` · ⚡ server cache (${data.cacheAgeMin}min)` : '';
+        toast({ title: `✅ ${sourceName}`, description: `${incoming.length} ${tr("news_count", lang)}${cacheNote}` });
       }
     } catch (err) {
       toast({ title: tr("toast_error_news", lang), description: err instanceof Error ? err.message : tr("toast_retry", lang), variant: "destructive" });
@@ -205,6 +240,7 @@ export function NewsList({ onSelectNews, selectedUrl, onStepChange }: NewsListPr
   };
 
   const isLoading = loadingSource !== null;
+  const isDisabled = isLoading || cooldownActive;
 
   // ── STEP: NICHE ─────────────────────────────────────────────
   if (step === "niche") {
@@ -341,11 +377,11 @@ export function NewsList({ onSelectNews, selectedUrl, onStepChange }: NewsListPr
               <button
                 key={s.name}
                 onClick={() => fetchSource(s.name)}
-                disabled={isLoading}
+                disabled={isDisabled}
                 className="relative flex flex-col items-center justify-center gap-2 px-3 py-5 rounded-xl border text-center transition-all duration-200 group overflow-hidden"
                 style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--muted) / 0.35)", minHeight: 108 }}
                 onMouseEnter={(e) => {
-                  if (!isLoading) {
+                  if (!isDisabled) {
                     e.currentTarget.style.borderColor = s.color + "60";
                     e.currentTarget.style.background = `${s.color}0e`;
                     e.currentTarget.style.boxShadow = `0 0 28px ${s.color}18`;
@@ -421,7 +457,7 @@ export function NewsList({ onSelectNews, selectedUrl, onStepChange }: NewsListPr
             </span>
           </div>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => activeSource && fetchSource(activeSource)} disabled={isLoading} className="h-7 px-2 text-xs gap-1">
+        <Button variant="ghost" size="sm" onClick={() => activeSource && fetchSource(activeSource, true)} disabled={isLoading} className="h-7 px-2 text-xs gap-1">
           {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
           <span className="text-[10px] uppercase tracking-wider" style={{ fontFamily: "var(--font-sub)" }}>{tr("update_btn", lang)}</span>
         </Button>
@@ -437,7 +473,7 @@ export function NewsList({ onSelectNews, selectedUrl, onStepChange }: NewsListPr
               <button
                 key={src.name}
                 onClick={() => fetchSource(src.name)}
-                disabled={isLoading}
+                disabled={isDisabled}
                 className="flex items-center gap-1.5 text-[9px] px-2 py-1 rounded-lg border transition-all font-bold uppercase tracking-wide"
                 style={{
                   borderColor: active ? src.color + "60" : "hsl(var(--border))",
