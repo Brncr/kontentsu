@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/contexts/AuthContext";
+import { clearAdminSession } from "@/components/AdminRoute";
 import {
   ArrowLeft, Loader2, Users, ScrollText, Twitter, TrendingUp,
-  Gamepad2, Globe, Cpu, Crown, Activity, Calendar,
+  Gamepad2, Globe, Cpu, Crown, Activity, Calendar, LogOut,
 } from "lucide-react";
 import kontentsuLogo from "@/assets/kontentsu-logotype.png";
 
@@ -42,22 +42,28 @@ const NICHE_META: Record<string, { label: string; color: string; icon: React.Rea
 
 const Admin = () => {
   const navigate = useNavigate();
-  const { session } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [kpis, setKpis] = useState<KPIs | null>(null);
   const [users, setUsers] = useState<UserStat[]>([]);
 
   useEffect(() => {
-    if (!session) return;
     fetchStats();
-  }, [session]);
+  }, []);
+
+  const handleLogout = () => {
+    clearAdminSession();
+    navigate("/admin/login", { replace: true });
+  };
 
   const fetchStats = async () => {
     setLoading(true);
     setError(null);
     try {
-      const { data, error: fnError } = await supabase.functions.invoke("admin-stats");
+      const adminCreds = JSON.parse(sessionStorage.getItem('kontentsu_admin_creds') || '{}');
+      const { data, error: fnError } = await supabase.functions.invoke("admin-stats", {
+        body: { adminUser: adminCreds.username, adminPass: adminCreds.password },
+      });
       if (fnError) throw fnError;
       if (!data.success) throw new Error(data.error);
       setKpis(data.kpis);
@@ -151,6 +157,21 @@ const Admin = () => {
               className="h-5 object-contain"
               style={{ filter: "drop-shadow(0 0 8px hsl(var(--primary) / 0.5))" }}
             />
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all"
+              style={{
+                fontFamily: "var(--font-sub)",
+                background: "hsl(var(--destructive) / 0.08)",
+                border: "1px solid hsl(var(--destructive) / 0.25)",
+                color: "hsl(var(--destructive))",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "hsl(var(--destructive) / 0.18)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "hsl(var(--destructive) / 0.08)"; }}
+            >
+              <LogOut className="w-3 h-3" />
+              Sair
+            </button>
           </div>
         </div>
       </header>

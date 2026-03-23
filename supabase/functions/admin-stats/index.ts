@@ -1,9 +1,13 @@
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-admin-secret, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-const ADMIN_EMAILS = ['g91700194@gmail.com'];
+// Admin credentials (same as frontend)
+const ADMIN_USERS = [
+  { username: 'brncrysis', password: '123456' },
+  { username: 'nenesk', password: '123456' },
+];
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -11,42 +15,43 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Verify authorization
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Não autorizado' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    // Verify admin credentials from request body
+    const body = await req.json().catch(() => ({}));
+    const { adminUser, adminPass } = body;
 
-    // Get user from token
-    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabaseAnon = Deno.env.get('SUPABASE_ANON_KEY')!;
+    const isAdmin = ADMIN_USERS.some(
+      (u) => u.username === adminUser && u.password === adminPass
+    );
 
-    // Verify JWT with anon client
-    const anonClient = createClient(supabaseUrl, supabaseAnon, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: authError } = await anonClient.auth.getUser();
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Token inválido' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    if (!isAdmin) {
+      // Fallback: check JWT auth (for backwards compatibility)
+      const authHeader = req.headers.get('authorization');
+      if (!authHeader) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Não autorizado' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
 
-    // Check admin access
-    if (!ADMIN_EMAILS.includes(user.email || '')) {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Acesso negado — não é admin' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const supabaseAnon = Deno.env.get('SUPABASE_ANON_KEY')!;
+      const anonClient = createClient(supabaseUrl, supabaseAnon, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user }, error: authError } = await anonClient.auth.getUser();
+      if (authError || !user || !['g91700194@gmail.com'].includes(user.email || '')) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'Acesso negado' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     // Use service role client to access all data
+    const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
     // 1. Get all users from auth.users
@@ -86,7 +91,6 @@ Deno.serve(async (req) => {
       };
     });
 
-    // Sort by most recent signup
     userStats.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     // 4. Build KPIs
@@ -97,13 +101,11 @@ Deno.serve(async (req) => {
     const activeUsers = userStats.filter((u: any) => u.totalGenerated > 0).length;
     const avgPerUser = totalUsers > 0 ? Math.round((totalGenerated / totalUsers) * 10) / 10 : 0;
 
-    // Niche breakdown
     const nicheBreakdown: Record<string, number> = {};
     (scripts || []).forEach((s: any) => {
       if (s.niche) nicheBreakdown[s.niche] = (nicheBreakdown[s.niche] || 0) + 1;
     });
 
-    // Daily signups (last 30 days)
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const dailySignups: Record<string, number> = {};
@@ -118,16 +120,7 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        kpis: {
-          totalUsers,
-          activeUsers,
-          totalScripts,
-          totalTweets,
-          totalGenerated,
-          avgPerUser,
-          nicheBreakdown,
-          dailySignups,
-        },
+        kpis: { totalUsers, activeUsers, totalScripts, totalTweets, totalGenerated, avgPerUser, nicheBreakdown, dailySignups },
         users: userStats,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

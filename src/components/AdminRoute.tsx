@@ -1,39 +1,36 @@
 import { Navigate } from "react-router-dom";
-import { useAuth } from "@/contexts/AuthContext";
 
-const ADMIN_EMAILS = ["g91700194@gmail.com"];
+const ADMIN_SESSION_KEY = "kontentsu_admin_session";
+
+export function isAdminAuthenticated(): boolean {
+  return sessionStorage.getItem(ADMIN_SESSION_KEY) === "authenticated";
+}
+
+export function setAdminAuthenticated(username: string, password: string) {
+  sessionStorage.setItem(ADMIN_SESSION_KEY, "authenticated");
+  sessionStorage.setItem("kontentsu_admin_creds", JSON.stringify({ username, password }));
+}
+
+export function clearAdminSession() {
+  sessionStorage.removeItem(ADMIN_SESSION_KEY);
+  sessionStorage.removeItem("kontentsu_admin_creds");
+}
+
+// Admin credentials (hashed comparison would be ideal for production)
+export const ADMIN_USERS = [
+  { username: "brncrysis", password: "123456" },
+  { username: "nenesk", password: "123456" },
+];
+
+export function validateAdmin(username: string, password: string): boolean {
+  return ADMIN_USERS.some(
+    (u) => u.username === username && u.password === password
+  );
+}
 
 export function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-4 animate-fade-in">
-          <div
-            className="w-10 h-10 rounded-full animate-pulse-neon"
-            style={{
-              background: "hsl(var(--primary) / 0.15)",
-              border: "2px solid hsl(var(--primary) / 0.5)",
-            }}
-          />
-          <p
-            className="text-[11px] uppercase tracking-[0.2em]"
-            style={{
-              color: "hsl(var(--muted-foreground))",
-              fontFamily: "var(--font-sub)",
-            }}
-          >
-            Verificando acesso...
-          </p>
-        </div>
-      </div>
-    );
+  if (!isAdminAuthenticated()) {
+    return <Navigate to="/admin/login" replace />;
   }
-
-  if (!user || !ADMIN_EMAILS.includes(user.email || "")) {
-    return <Navigate to="/" replace />;
-  }
-
   return <>{children}</>;
 }
