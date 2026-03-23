@@ -58,10 +58,11 @@ Deno.serve(async (req) => {
     const { data: { users }, error: usersError } = await adminClient.auth.admin.listUsers({ perPage: 1000 });
     if (usersError) throw usersError;
 
-    // 2. Get all saved_scripts
+    // 2. Get all saved_scripts with full content
     const { data: scripts, error: scriptsError } = await adminClient
       .from('saved_scripts')
-      .select('id, user_id, niche, script_type, created_at, news_source');
+      .select('id, user_id, niche, script_type, created_at, news_source, news_title, news_url, script_title, script_hook, script_dev, script_cta, script_hashtags, tweet_content, is_favorite')
+      .order('created_at', { ascending: false });
     if (scriptsError) throw scriptsError;
 
     // 3. Build per-user stats
@@ -74,6 +75,24 @@ Deno.serve(async (req) => {
       const lastUse = userScripts.length > 0
         ? userScripts.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0].created_at
         : null;
+
+      // Build content items for this user
+      const contentItems = userScripts.map((s: any) => ({
+        id: s.id,
+        type: s.script_type,
+        newsTitle: s.news_title,
+        newsUrl: s.news_url,
+        newsSource: s.news_source,
+        niche: s.niche,
+        scriptTitle: s.script_title,
+        scriptHook: s.script_hook,
+        scriptDev: s.script_dev,
+        scriptCta: s.script_cta,
+        scriptHashtags: s.script_hashtags || [],
+        tweetContent: s.tweet_content,
+        isFavorite: s.is_favorite,
+        createdAt: s.created_at,
+      }));
 
       return {
         id: u.id,
@@ -88,6 +107,7 @@ Deno.serve(async (req) => {
         niches,
         sources,
         lastUse,
+        scripts: contentItems,
       };
     });
 
