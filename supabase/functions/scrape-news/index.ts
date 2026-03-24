@@ -246,8 +246,7 @@ Deno.serve(async (req) => {
     const sources: Source[] = [
       // ─── GAMES ──────────────────────────────────────────────────────────────
       {
-        // gam3s.gg: /news/ page has direct article links in HTML, scrape them live
-        // URLs: gam3s.gg/news/blizzard-announces-overwatch-rush-mobile-game/
+        // gam3s.gg: JS-rendered, useScrapLinks gets 0 article links. Must use Search API.
         url: 'https://gam3s.gg/news/',
         filter: (l) =>
           l.includes('gam3s.gg/') &&
@@ -257,7 +256,8 @@ Deno.serve(async (req) => {
           !l.match(/\/(page|category|tag|author|about|newsletter|privacy|terms|contact|sitemap)\//i) &&
           (l.includes('/news/') || l.includes('/web3-gaming/') || !!l.match(/gam3s\.gg\/[a-z0-9][a-z0-9-]{8,}/i)),
         name: 'gam3s.gg',
-        useScrapLinks: true,
+        limit: 20,
+        useSearch: 'site:gam3s.gg/news gaming news',
         sourceLang: 'en',
       },
       {
@@ -419,13 +419,13 @@ Deno.serve(async (req) => {
         url: 'https://www.rockpapershotgun.com/news',
         filter: (l) => {
           if (!l.includes('rockpapershotgun.com/')) return false;
-          if (l === 'https://www.rockpapershotgun.com/' || l === 'https://rockpapershotgun.com/') return false;
+          if (l === 'https://www.rockpapershotgun.com/' || l === 'https://rockpapershotgun.com/' || l === 'https://www.rockpapershotgun.com/news' || l === 'https://www.rockpapershotgun.com/news/') return false;
           if (l.includes('#') || l.includes('?')) return false;
           if (l.match(/\/(tag|author|category|about|page|forum)\//i)) return false;
           const yearMatch = l.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//);
           if (yearMatch && parseInt(yearMatch[1]) < 2024) return false;
           return !!l.match(/rockpapershotgun\.com\/\d{4}\/\d{2}\/\d{2}\//i) ||
-                 !!l.match(/rockpapershotgun\.com\/[a-z0-9-]{15,}\/?$/i);
+                 !!l.match(/rockpapershotgun\.com\/[a-z0-9-]{10,}\/?$/i);
         },
         sort: (links) => links.sort((a, b) => {
           const mA = a.match(/\/(\d{4})\/(\d{2})\/(\d{2})\//);
@@ -552,7 +552,8 @@ Deno.serve(async (req) => {
                  !!l.match(/bitcoinmagazine\.com\/[a-z0-9-]{15,}\/?$/i);
         },
         name: 'Bitcoin Magazine',
-        useScrapLinks: true,
+        limit: 20,
+        useSearch: 'site:bitcoinmagazine.com news bitcoin',
         sourceLang: 'en',
       },
       {
@@ -580,7 +581,8 @@ Deno.serve(async (req) => {
           return !!l.match(/cryptopotato\.com\/[a-z0-9][a-z0-9-]{7,}\/?$/i);
         },
         name: 'CryptoPotato',
-        useScrapLinks: true,
+        limit: 20,
+        useSearch: 'site:cryptopotato.com crypto news',
         sourceLang: 'en',
       },
 
