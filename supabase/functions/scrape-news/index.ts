@@ -416,7 +416,8 @@ Deno.serve(async (req) => {
         sourceLang: 'en',
       },
       {
-        url: 'https://www.rockpapershotgun.com/',
+        // Rock Paper Shotgun: /news page lists 25+ articles vs ~5 on homepage
+        url: 'https://www.rockpapershotgun.com/news',
         filter: (l) => {
           if (!l.includes('rockpapershotgun.com/')) return false;
           if (l === 'https://www.rockpapershotgun.com/' || l === 'https://rockpapershotgun.com/') return false;
@@ -508,7 +509,8 @@ Deno.serve(async (req) => {
         sourceLang: 'pt',
       },
       {
-        url: 'https://www.theblock.co/latest-crypto-news',
+        // The Block: /latest has more articles than homepage
+        url: 'https://www.theblock.co/latest',
         filter: (l) => {
           if (!l.includes('theblock.co/post/')) return false;
           if (l.includes('#') || l.includes('?')) return false;
@@ -525,7 +527,8 @@ Deno.serve(async (req) => {
         sourceLang: 'en',
       },
       {
-        url: 'https://decrypt.co/',
+        // Decrypt: /news page lists 12+ articles vs price tickers on homepage
+        url: 'https://decrypt.co/news',
         filter: (l) => {
           if (!l.includes('decrypt.co/')) return false;
           if (l === 'https://decrypt.co/' || l === 'https://decrypt.co') return false;
@@ -539,7 +542,8 @@ Deno.serve(async (req) => {
         sourceLang: 'en',
       },
       {
-        url: 'https://bitcoinmagazine.com/',
+        // Bitcoin Magazine: /news has chronological article listing
+        url: 'https://bitcoinmagazine.com/news',
         filter: (l) => {
           if (!l.includes('bitcoinmagazine.com/')) return false;
           if (l === 'https://bitcoinmagazine.com/' || l === 'https://www.bitcoinmagazine.com/') return false;
@@ -553,7 +557,8 @@ Deno.serve(async (req) => {
         sourceLang: 'en',
       },
       {
-        url: 'https://br.beincrypto.com/',
+        // BeInCrypto BR: /noticias page has full article listing
+        url: 'https://br.beincrypto.com/noticias/',
         filter: (l) => {
           if (!l.includes('br.beincrypto.com/') && !l.includes('beincrypto.com/')) return false;
           if (l === 'https://br.beincrypto.com/' || l === 'https://beincrypto.com/') return false;
@@ -566,7 +571,8 @@ Deno.serve(async (req) => {
         sourceLang: 'pt',
       },
       {
-        url: 'https://cryptopotato.com/',
+        // CryptoPotato: /news page has full article listing
+        url: 'https://cryptopotato.com/crypto-news/',
         filter: (l) => {
           if (!l.includes('cryptopotato.com/')) return false;
           if (l === 'https://cryptopotato.com/' || l === 'https://www.cryptopotato.com/') return false;
