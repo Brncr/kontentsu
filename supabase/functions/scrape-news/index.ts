@@ -259,17 +259,24 @@ Deno.serve(async (req) => {
         sourceLang: 'en',
       },
       {
-        // Voxel/TecMundo: usar Search API com query específica para evitar páginas de categoria
+        // Voxel/TecMundo: usar Map API direto no site — Search retorna resultados defasados do Google
+        // URLs reais: tecmundo.com.br/voxel/503861-slug.htm
         url: 'https://www.tecmundo.com.br/voxel',
         filter: (l) => {
           if (!l.includes('tecmundo.com.br/')) return false;
           if (l.includes('#') || l.includes('?')) return false;
           if (l === 'https://www.tecmundo.com.br/voxel' || l === 'https://www.tecmundo.com.br/voxel/') return false;
-          return !!l.match(/tecmundo\.com\.br\/[^/]+\/\d{4,}-[a-z0-9-]+/i);
+          if (l.match(/\/(feed|pagina-\d|categoria|tag|autor)\//i)) return false;
+          return !!l.match(/tecmundo\.com\.br\/voxel\/\d{4,}-[a-z0-9-]+\.htm/i);
         },
+        sort: (links) => links.sort((a, b) => {
+          const idA = parseInt(a.match(/\/(\d{4,})-/)?.[1] || '0');
+          const idB = parseInt(b.match(/\/(\d{4,})-/)?.[1] || '0');
+          return idB - idA; // Higher ID = newer article
+        }),
         name: 'Voxel',
-        limit: 10,
-        useSearch: 'site:tecmundo.com.br/voxel jogos noticias',
+        limit: 80,
+        mapSearch: 'voxel noticias',
         sourceLang: 'pt',
       },
       {
