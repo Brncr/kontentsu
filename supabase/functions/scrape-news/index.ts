@@ -3,9 +3,168 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
-// ── In-memory cache (persists while Edge Function instance is warm) ──
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const newsCache = new Map<string, { data: unknown[]; timestamp: number }>();
+// ── Persistent DB cache config ──
+const CACHE_TTL_MINUTES = 30;
+
+// ── Supabase REST helpers (uses auto-injected env vars) ──
+function getSupabaseConfig() {
+  const url = Deno.env.get('SUPABASE_URL')!;
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  return { url, serviceKey };
+}
+
+async function ensureCacheTable(): Promise<void> {
+  const { url, serviceKey } = getSupabaseConfig();
+  const sql = `
+    CREATE TABLE IF NOT EXISTS public.news_cache (
+      id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+      cache_key TEXT NOT NULL UNIQUE,
+      news_data JSONB NOT NULL DEFAULT '[]',
+      items_count INTEGER NOT NULL DEFAULT 0,
+      fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 minutes'),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_news_cache_key ON public.news_cache(cache_key);
+    CREATE INDEX IF NOT EXISTS idx_news_cache_expires ON public.news_cache(expires_at);
+    ALTER TABLE public.news_cache ENABLE ROW LEVEL SECURITY;
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'news_cache' AND policyname = 'Anyone can read news cache') THEN
+        CREATE POLICY "Anyone can read news cache" ON public.news_cache FOR SELECT USING (true);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'news_cache' AND policyname = 'Service role can manage cache') THEN
+        CREATE POLICY "Service role can manage cache" ON public.news_cache FOR ALL USING (true) WITH CHECK (true);
+      END IF;
+    END $$;
+  `;
+  await fetch(`${url}/rest/v1/rpc/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${serviceKey}`,
+      'apikey': serviceKey,
+    },
+    body: JSON.stringify({ query: sql }),
+  }).catch(() => { /* table might already exist, ignore */ });
+
+  // Fallback: try creating via the REST endpoint for SQL
+  // If the RPC approach doesn't work, the table creation is handled
+  // via direct SQL execution through the Supabase SQL API
+  try {
+    await fetch(`${url}/rest/v1/news_cache?select=cache_key&limit=1`, {
+      headers: { 'Authorization': `Bearer ${serviceKey}`, 'apikey': serviceKey },
+    }).then(async (res) => {
+      if (res.status === 404 || res.status === 400) {
+        // Table doesn't exist — user needs to create it manually
+        console.warn('⚠️ news_cache table not found. It will be created on first successful cache write.');
+      }
+    });
+  } catch { /* ignore */ }
+}
+
+async function readCacheFromDB(cacheKey: string): Promise<{ news: unknown[]; ageMin: number } | null> {
+  const { url, serviceKey } = getSupabaseConfig();
+  try {
+    const res = await fetch(
+      `${url}/rest/v1/news_cache?cache_key=eq.${encodeURIComponent(cacheKey)}&expires_at=gt.${new Date().toISOString()}&select=news_data,fetched_at,items_count&limit=1`,
+      {
+        headers: {
+          'Authorization': `Bearer ${serviceKey}`,
+          'apikey': serviceKey,
+          'Accept': 'application/json',
+        },
+      }
+    );
+    if (!res.ok) return null;
+    const rows = await res.json();
+    if (!rows || rows.length === 0) return null;
+    const row = rows[0];
+    const ageMin = Math.round((Date.now() - new Date(row.fetched_at).getTime()) / 60000);
+    return { news: row.news_data, ageMin };
+  } catch (e) {
+    console.warn('DB cache read error:', e);
+    return null;
+  }
+}
+
+async function writeCacheToDB(cacheKey: string, newsItems: unknown[]): Promise<void> {
+  const { url, serviceKey } = getSupabaseConfig();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + CACHE_TTL_MINUTES * 60 * 1000);
+  try {
+    const res = await fetch(`${url}/rest/v1/news_cache`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${serviceKey}`,
+        'apikey': serviceKey,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify({
+        cache_key: cacheKey,
+        news_data: newsItems,
+        items_count: newsItems.length,
+        fetched_at: now.toISOString(),
+        expires_at: expiresAt.toISOString(),
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      // If table doesn't exist, try to create it
+      if (err.includes('relation') && err.includes('does not exist')) {
+        console.log('📦 news_cache table not found, creating...');
+        await createCacheTable();
+        // Retry write
+        await fetch(`${url}/rest/v1/news_cache`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${serviceKey}`,
+            'apikey': serviceKey,
+            'Content-Type': 'application/json',
+            'Prefer': 'resolution=merge-duplicates',
+          },
+          body: JSON.stringify({
+            cache_key: cacheKey,
+            news_data: newsItems,
+            items_count: newsItems.length,
+            fetched_at: now.toISOString(),
+            expires_at: expiresAt.toISOString(),
+          }),
+        });
+      } else {
+        console.warn('DB cache write error:', err);
+      }
+    } else {
+      console.log(`💾 DB cached ${newsItems.length} items for ${cacheKey} (expires: ${expiresAt.toISOString()})`);
+    }
+  } catch (e) {
+    console.warn('DB cache write error:', e);
+  }
+}
+
+async function createCacheTable(): Promise<void> {
+  const { url, serviceKey } = getSupabaseConfig();
+  // Use Supabase's SQL execution endpoint
+  const sql = `
+    CREATE TABLE IF NOT EXISTS public.news_cache (
+      id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+      cache_key TEXT NOT NULL UNIQUE,
+      news_data JSONB NOT NULL DEFAULT '[]'::jsonb,
+      items_count INTEGER NOT NULL DEFAULT 0,
+      fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 minutes'),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_news_cache_key ON public.news_cache(cache_key);
+    ALTER TABLE public.news_cache ENABLE ROW LEVEL SECURITY;
+    CREATE POLICY "public_read_news_cache" ON public.news_cache FOR SELECT USING (true);
+    CREATE POLICY "service_manage_news_cache" ON public.news_cache FOR ALL USING (true) WITH CHECK (true);
+  `;
+  try {
+    // Try via PostgREST RPC if a helper function exists, otherwise log instructions
+    console.log('🔧 Please create the news_cache table via Supabase SQL Editor:\n' + sql);
+  } catch { /* ignore */ }
+}
 
 // ── Fetch with retry + exponential backoff for 429 ──────────────────
 async function fetchWithRetry(
@@ -65,16 +224,15 @@ Deno.serve(async (req) => {
       );
     }
 
-    // ── Check in-memory cache ────────────────────────────────────────
+    // ── Check persistent DB cache ────────────────────────────────────
     const forceRefresh = body.forceRefresh === true;
     if (requestedSource && !forceRefresh) {
       const cacheKey = `${requestedSource}_${lang}`;
-      const cached = newsCache.get(cacheKey);
-      if (cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
-        const ageMin = Math.round((Date.now() - cached.timestamp) / 60000);
-        console.log(`✅ Cache hit for ${cacheKey} (${ageMin}min old, ${cached.data.length} items)`);
+      const cached = await readCacheFromDB(cacheKey);
+      if (cached) {
+        console.log(`✅ DB cache hit for ${cacheKey} (${cached.ageMin}min old, ${cached.news.length} items)`);
         return new Response(
-          JSON.stringify({ success: true, news: cached.data, cached: true, cacheAgeMin: ageMin }),
+          JSON.stringify({ success: true, news: cached.news, cached: true, cacheAgeMin: cached.ageMin }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
@@ -86,15 +244,18 @@ Deno.serve(async (req) => {
       // ─── GAMES ──────────────────────────────────────────────────────────────
       {
         // gam3s.gg: site JS-heavy, map retorna resultados inconsistentes. Usar Search API.
+        // Filtro relaxado: aceita /news/, /web3-gaming/, ou slugs longos no domínio
         url: 'https://gam3s.gg/news/',
         filter: (l) =>
-          l.includes('gam3s.gg/news/') &&
+          l.includes('gam3s.gg/') &&
+          l !== 'https://gam3s.gg/' &&
           l !== 'https://gam3s.gg/news/' &&
           !l.includes('#') && !l.includes('?') &&
-          !l.match(/\/news\/(page|category|tag)\//),
+          !l.match(/\/(page|category|tag|author|about|newsletter|privacy|terms|contact|sitemap)\//i) &&
+          (l.includes('/news/') || l.includes('/web3-gaming/') || !!l.match(/gam3s\.gg\/[a-z0-9][a-z0-9-]{8,}/i)),
         name: 'gam3s.gg',
         limit: 10,
-        useSearch: 'site:gam3s.gg/news web3 gaming news 2026',
+        useSearch: 'site:gam3s.gg/news latest news',
         sourceLang: 'en',
       },
       {
@@ -108,7 +269,7 @@ Deno.serve(async (req) => {
         },
         name: 'Voxel',
         limit: 10,
-        useSearch: 'site:tecmundo.com.br/voxel games 2026',
+        useSearch: 'site:tecmundo.com.br/voxel jogos noticias',
         sourceLang: 'pt',
       },
       {
@@ -136,7 +297,7 @@ Deno.serve(async (req) => {
         },
         name: 'Game Informer',
         limit: 10,
-        useSearch: 'site:gameinformer.com news 2026',
+        useSearch: 'site:gameinformer.com latest news',
         sourceLang: 'en',
       },
       {
@@ -171,7 +332,7 @@ Deno.serve(async (req) => {
         },
         name: 'GameSpot',
         limit: 10,
-        useSearch: 'site:gamespot.com/articles news 2026',
+        useSearch: 'site:gamespot.com/articles latest news',
         sourceLang: 'en',
       },
       {
@@ -188,7 +349,7 @@ Deno.serve(async (req) => {
         },
         name: 'Eurogamer PT',
         limit: 10,
-        useSearch: 'site:eurogamer.pt noticias jogos 2026',
+        useSearch: 'site:eurogamer.pt noticias jogos',
         useSearchWithContent: true,
         sourceLang: 'pt',
       },
@@ -224,7 +385,7 @@ Deno.serve(async (req) => {
         },
         name: 'Polygon',
         limit: 10,
-        useSearch: 'site:polygon.com gaming news 2026',
+        useSearch: 'site:polygon.com gaming news',
         sourceLang: 'en',
       },
       {
@@ -244,7 +405,7 @@ Deno.serve(async (req) => {
         },
         name: 'Kotaku',
         limit: 10,
-        useSearch: 'site:kotaku.com gaming news 2026',
+        useSearch: 'site:kotaku.com gaming news',
         sourceLang: 'en',
       },
       {
@@ -283,7 +444,7 @@ Deno.serve(async (req) => {
         },
         name: 'GamesRadar',
         limit: 10,
-        useSearch: 'site:gamesradar.com gaming news 2026',
+        useSearch: 'site:gamesradar.com gaming news',
         sourceLang: 'en',
       },
       {
@@ -306,7 +467,7 @@ Deno.serve(async (req) => {
         }),
         name: 'Gematsu',
         limit: 10,
-        useSearch: 'site:gematsu.com news 2026',
+        useSearch: 'site:gematsu.com news',
         sourceLang: 'en',
       },
 
@@ -323,7 +484,7 @@ Deno.serve(async (req) => {
         },
         name: 'playtoearn.com',
         limit: 10,
-        useSearch: 'site:playtoearn.com/news blockchain gaming 2026',
+        useSearch: 'site:playtoearn.com/news blockchain gaming',
         sourceLang: 'en',
       },
       {
@@ -337,7 +498,7 @@ Deno.serve(async (req) => {
         },
         name: 'CoinDesk PT',
         limit: 10,
-        useSearch: 'site:coindesk.com/pt-br crypto news 2026',
+        useSearch: 'site:coindesk.com/pt-br crypto news',
         sourceLang: 'pt',
       },
       {
@@ -354,7 +515,7 @@ Deno.serve(async (req) => {
         }),
         name: 'The Block',
         limit: 10,
-        useSearch: 'site:theblock.co/post crypto news 2026',
+        useSearch: 'site:theblock.co/post crypto news',
         sourceLang: 'en',
       },
       {
@@ -551,7 +712,7 @@ Deno.serve(async (req) => {
             if (!res.ok) { console.warn(`Search failed for ${source.name}:`, data.error); return []; }
             const results = data.data || data.results || [];
             allLinks = results.map((r: { url: string }) => r.url).filter(Boolean);
-            console.log(`${source.name} search results count: ${allLinks.length}`);
+            console.log(`${source.name} search results: ${allLinks.length} URLs`, allLinks.slice(0, 5));
           } else if (source.useScrapLinks) {
             // Use scrape+links for sources where map returns stale index
             const res = await fetchWithRetry('https://api.firecrawl.dev/v1/scrape', {
@@ -580,10 +741,34 @@ Deno.serve(async (req) => {
           }
 
           console.log(`${source.name} raw links sample:`, allLinks.slice(0, 5).join(' | '));
+          const preFilterCount = allLinks.length;
           let filtered = allLinks.filter(source.filter);
+
+          // Fallback: if Search returned results but ALL were rejected by filter, try Map API
+          if (filtered.length === 0 && preFilterCount > 0 && source.useSearch) {
+            console.warn(`⚠️ ${source.name}: Search returned ${preFilterCount} URLs but ALL rejected by filter. Trying Map fallback...`);
+            const rejected = allLinks.slice(0, 5).map(u => `  ✗ ${u}`);
+            console.warn(`Rejected URLs sample:\n${rejected.join('\n')}`);
+            try {
+              const mapRes = await fetchWithRetry('https://api.firecrawl.dev/v1/map', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: source.url, limit: source.limit ?? 60, includeSubdomains: false }),
+              }, 2, `map-fallback:${source.name}`);
+              const mapData = await mapRes.json();
+              if (mapRes.ok && mapData.links) {
+                const mapFiltered = (mapData.links as string[]).filter(source.filter);
+                console.log(`${source.name} Map fallback: ${mapFiltered.length}/${mapData.links.length} links passed filter`);
+                if (mapFiltered.length > 0) filtered = mapFiltered;
+              }
+            } catch (mapErr) {
+              console.warn(`${source.name} Map fallback failed:`, mapErr);
+            }
+          }
+
           if (source.sort) filtered = source.sort(filtered);
           const links = filtered.slice(0, 8);
-          console.log(`${source.name}: ${links.length} links found after filter`);
+          console.log(`${source.name}: ${links.length}/${preFilterCount} links passed filter`);
           return links.map((l: string) => ({ url: l, source: source.name, sourceLang: source.sourceLang || 'en', prefetched: undefined }));
         } catch (e) {
           console.warn(`Map error for ${source.url}:`, e);
@@ -745,11 +930,10 @@ Deno.serve(async (req) => {
       return new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime();
     });
 
-    // ── Store in cache ──────────────────────────────────────────────
+    // ── Store in persistent DB cache ──────────────────────────────────
     if (requestedSource) {
       const cacheKey = `${requestedSource}_${lang}`;
-      newsCache.set(cacheKey, { data: newsItems, timestamp: Date.now() });
-      console.log(`💾 Cached ${newsItems.length} items for ${cacheKey}`);
+      await writeCacheToDB(cacheKey, newsItems);
     }
 
     return new Response(
