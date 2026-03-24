@@ -262,7 +262,7 @@ Deno.serve(async (req) => {
         sourceLang: 'en',
       },
       {
-        // Voxel/TecMundo: usar Map API direto no site — Search retorna resultados defasados do Google
+        // Voxel/TecMundo: scrape homepage ao vivo para links mais recentes
         // URLs reais: tecmundo.com.br/voxel/503861-slug.htm
         url: 'https://www.tecmundo.com.br/voxel',
         filter: (l) => {
@@ -278,8 +278,7 @@ Deno.serve(async (req) => {
           return idB - idA; // Higher ID = newer article
         }),
         name: 'Voxel',
-        limit: 80,
-        mapSearch: 'voxel noticias',
+        useScrapLinks: true,
         sourceLang: 'pt',
       },
       {
@@ -291,8 +290,7 @@ Deno.serve(async (req) => {
           return !!l.match(/terra\.com\.br\/.+,[a-z0-9]{10,}\.html/i);
         },
         name: 'Terra GameOn',
-        limit: 80,
-        mapSearch: currentYear,
+        useScrapLinks: true,
         sourceLang: 'pt',
       },
       {
@@ -326,8 +324,7 @@ Deno.serve(async (req) => {
           return tB - tA;
         }),
         name: 'GameVício',
-        limit: 80,
-        mapSearch: currentYear,
+        useScrapLinks: true,
         sourceLang: 'pt',
       },
       {
@@ -438,8 +435,7 @@ Deno.serve(async (req) => {
           return tB - tA;
         }),
         name: 'Rock Paper Shotgun',
-        limit: 80,
-        mapSearch: currentYear,
+        useScrapLinks: true,
         sourceLang: 'en',
       },
       {
@@ -539,8 +535,7 @@ Deno.serve(async (req) => {
                  !!l.match(/decrypt\.co\/[a-z0-9-]{10,}\/?$/i);
         },
         name: 'Decrypt',
-        limit: 80,
-        mapSearch: currentYear,
+        useScrapLinks: true,
         sourceLang: 'en',
       },
       {
@@ -554,8 +549,7 @@ Deno.serve(async (req) => {
                  !!l.match(/bitcoinmagazine\.com\/[a-z0-9-]{15,}\/?$/i);
         },
         name: 'Bitcoin Magazine',
-        limit: 80,
-        mapSearch: currentYear,
+        useScrapLinks: true,
         sourceLang: 'en',
       },
       {
@@ -568,8 +562,7 @@ Deno.serve(async (req) => {
           return !!l.match(/beincrypto\.com\/[a-z0-9-]{10,}\/?$/i);
         },
         name: 'BeInCrypto BR',
-        limit: 80,
-        mapSearch: currentYear,
+        useScrapLinks: true,
         sourceLang: 'pt',
       },
       {
@@ -582,8 +575,7 @@ Deno.serve(async (req) => {
           return !!l.match(/cryptopotato\.com\/[a-z0-9][a-z0-9-]{7,}\/?$/i);
         },
         name: 'CryptoPotato',
-        limit: 80,
-        mapSearch: currentYear,
+        useScrapLinks: true,
         sourceLang: 'en',
       },
 
