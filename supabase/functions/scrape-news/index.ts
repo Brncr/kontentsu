@@ -246,8 +246,8 @@ Deno.serve(async (req) => {
     const sources: Source[] = [
       // ─── GAMES ──────────────────────────────────────────────────────────────
       {
-        // gam3s.gg: site JS-heavy, map retorna resultados inconsistentes. Usar Search API.
-        // Filtro relaxado: aceita /news/, /web3-gaming/, ou slugs longos no domínio
+        // gam3s.gg: /news/ page has direct article links in HTML, scrape them live
+        // URLs: gam3s.gg/news/blizzard-announces-overwatch-rush-mobile-game/
         url: 'https://gam3s.gg/news/',
         filter: (l) =>
           l.includes('gam3s.gg/') &&
@@ -257,8 +257,7 @@ Deno.serve(async (req) => {
           !l.match(/\/(page|category|tag|author|about|newsletter|privacy|terms|contact|sitemap)\//i) &&
           (l.includes('/news/') || l.includes('/web3-gaming/') || !!l.match(/gam3s\.gg\/[a-z0-9][a-z0-9-]{8,}/i)),
         name: 'gam3s.gg',
-        limit: 10,
-        useSearch: 'site:gam3s.gg/news latest news',
+        useScrapLinks: true,
         sourceLang: 'en',
       },
       {
@@ -304,7 +303,7 @@ Deno.serve(async (req) => {
                  !!l.match(/gameinformer\.com\/news\/[a-z0-9-]+/i);
         },
         name: 'Game Informer',
-        limit: 10,
+        limit: 20,
         useSearch: 'site:gameinformer.com latest news',
         sourceLang: 'en',
       },
@@ -338,7 +337,7 @@ Deno.serve(async (req) => {
                  !!l.match(/gamespot\.com\/articles\/[a-z0-9-]{10,}/i);
         },
         name: 'GameSpot',
-        limit: 10,
+        limit: 20,
         useSearch: 'site:gamespot.com/articles latest news',
         sourceLang: 'en',
       },
@@ -355,7 +354,7 @@ Deno.serve(async (req) => {
                  !!l.match(/eurogamer\.pt\/(noticias|analise|preview|feature|video|review)\/[a-z0-9-]{5,}/i);
         },
         name: 'Eurogamer PT',
-        limit: 10,
+        limit: 20,
         useSearch: 'site:eurogamer.pt noticias jogos',
         useSearchWithContent: true,
         sourceLang: 'pt',
@@ -372,7 +371,7 @@ Deno.serve(async (req) => {
                  !!l.match(/pcgamer\.com\/[a-z0-9-]+\/[a-z0-9][a-z0-9-]{10,}\//i);
         },
         name: 'PC Gamer',
-        limit: 10,
+        limit: 20,
         useSearch: 'site:pcgamer.com news',
         sourceLang: 'en',
       },
@@ -391,7 +390,7 @@ Deno.serve(async (req) => {
                  !!l.match(/polygon\.com\/[a-z0-9][a-z0-9-]{10,}\/$/i);
         },
         name: 'Polygon',
-        limit: 10,
+        limit: 20,
         useSearch: 'site:polygon.com gaming news',
         sourceLang: 'en',
       },
@@ -411,7 +410,7 @@ Deno.serve(async (req) => {
                  !!l.match(/kotaku\.com\/[a-z0-9-]{10,}\/$/i);
         },
         name: 'Kotaku',
-        limit: 10,
+        limit: 20,
         useSearch: 'site:kotaku.com gaming news',
         sourceLang: 'en',
       },
@@ -450,7 +449,7 @@ Deno.serve(async (req) => {
                  !!l.match(/gamesradar\.com\/[a-z0-9-]+\/[a-z0-9-]{10,}\/?/i);
         },
         name: 'GamesRadar',
-        limit: 10,
+        limit: 20,
         useSearch: 'site:gamesradar.com gaming news',
         sourceLang: 'en',
       },
@@ -473,7 +472,7 @@ Deno.serve(async (req) => {
           return tB - tA;
         }),
         name: 'Gematsu',
-        limit: 10,
+        limit: 20,
         useSearch: 'site:gematsu.com news',
         sourceLang: 'en',
       },
@@ -490,7 +489,7 @@ Deno.serve(async (req) => {
           return !!l.match(/playtoearn\.com\/news\/[a-z0-9-]{5,}/i);
         },
         name: 'playtoearn.com',
-        limit: 10,
+        limit: 20,
         useSearch: 'site:playtoearn.com/news blockchain gaming',
         sourceLang: 'en',
       },
@@ -504,7 +503,7 @@ Deno.serve(async (req) => {
           return !!l.match(/coindesk\.com\/pt-br\/[a-z0-9\/-]{10,}\/?$/i);
         },
         name: 'CoinDesk PT',
-        limit: 10,
+        limit: 20,
         useSearch: 'site:coindesk.com/pt-br crypto news',
         sourceLang: 'pt',
       },
@@ -522,7 +521,7 @@ Deno.serve(async (req) => {
           return idB - idA;
         }),
         name: 'The Block',
-        limit: 10,
+        limit: 20,
         useSearch: 'site:theblock.co/post crypto news',
         sourceLang: 'en',
       },
@@ -691,7 +690,7 @@ Deno.serve(async (req) => {
             if (!res.ok) { console.warn(`Search+content failed for ${source.name}:`, data.error); return []; }
             const results: Array<{ url: string; title?: string; description?: string; markdown?: string }> = data.data || data.results || [];
             console.log(`${source.name} search+content results: ${results.length}`);
-            const filtered = results.filter(r => r.url && source.filter(r.url)).slice(0, 8);
+            const filtered = results.filter(r => r.url && source.filter(r.url)).slice(0, 10);
             return filtered.map(r => ({
               url: r.url,
               source: source.name,
@@ -775,7 +774,7 @@ Deno.serve(async (req) => {
           }
 
           if (source.sort) filtered = source.sort(filtered);
-          const links = filtered.slice(0, 8);
+          const links = filtered.slice(0, 10);
           console.log(`${source.name}: ${links.length}/${preFilterCount} links passed filter`);
           return links.map((l: string) => ({ url: l, source: source.name, sourceLang: source.sourceLang || 'en', prefetched: undefined }));
         } catch (e) {
