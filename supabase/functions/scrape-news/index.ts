@@ -216,6 +216,9 @@ Deno.serve(async (req) => {
     const requestedSource: string | undefined = body.source;
     const lang: string = body.lang || 'pt'; // 'pt' | 'en' | 'es'
 
+    // Dynamic year for mapSearch — never hardcode, auto-updates every year
+    const currentYear = new Date().getFullYear().toString();
+
     const apiKey = Deno.env.get('FIRECRAWL_API_KEY');
     if (!apiKey) {
       return new Response(
@@ -289,7 +292,7 @@ Deno.serve(async (req) => {
         },
         name: 'Terra GameOn',
         limit: 80,
-        mapSearch: '2026',
+        mapSearch: currentYear,
         sourceLang: 'pt',
       },
       {
@@ -324,7 +327,7 @@ Deno.serve(async (req) => {
         }),
         name: 'GameVício',
         limit: 80,
-        mapSearch: '2026',
+        mapSearch: currentYear,
         sourceLang: 'pt',
       },
       {
@@ -436,7 +439,7 @@ Deno.serve(async (req) => {
         }),
         name: 'Rock Paper Shotgun',
         limit: 80,
-        mapSearch: '2026',
+        mapSearch: currentYear,
         sourceLang: 'en',
       },
       {
@@ -537,7 +540,7 @@ Deno.serve(async (req) => {
         },
         name: 'Decrypt',
         limit: 80,
-        mapSearch: '2026',
+        mapSearch: currentYear,
         sourceLang: 'en',
       },
       {
@@ -552,7 +555,7 @@ Deno.serve(async (req) => {
         },
         name: 'Bitcoin Magazine',
         limit: 80,
-        mapSearch: '2026',
+        mapSearch: currentYear,
         sourceLang: 'en',
       },
       {
@@ -566,7 +569,7 @@ Deno.serve(async (req) => {
         },
         name: 'BeInCrypto BR',
         limit: 80,
-        mapSearch: '2026',
+        mapSearch: currentYear,
         sourceLang: 'pt',
       },
       {
@@ -580,7 +583,7 @@ Deno.serve(async (req) => {
         },
         name: 'CryptoPotato',
         limit: 80,
-        mapSearch: '2026',
+        mapSearch: currentYear,
         sourceLang: 'en',
       },
 
@@ -594,7 +597,7 @@ Deno.serve(async (req) => {
         },
         name: 'GameDiscover.co',
         limit: 80,
-        mapSearch: '2026',
+        mapSearch: currentYear,
         sourceLang: 'en',
       },
       {
@@ -609,7 +612,7 @@ Deno.serve(async (req) => {
         },
         name: 'GameMakers',
         limit: 80,
-        mapSearch: '2026',
+        mapSearch: currentYear,
         sourceLang: 'en',
       },
       {
@@ -622,7 +625,7 @@ Deno.serve(async (req) => {
         },
         name: 'Elite Game Developers',
         limit: 80,
-        mapSearch: '2026',
+        mapSearch: currentYear,
         sourceLang: 'en',
       },
       {
@@ -639,7 +642,7 @@ Deno.serve(async (req) => {
         },
         name: 'Crossplay News',
         limit: 80,
-        mapSearch: '2026',
+        mapSearch: currentYear,
         sourceLang: 'en',
       },
       {
@@ -652,7 +655,7 @@ Deno.serve(async (req) => {
         },
         name: 'GameDev Reports',
         limit: 80,
-        mapSearch: '2026',
+        mapSearch: currentYear,
         sourceLang: 'en',
       },
     ];
