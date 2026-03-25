@@ -308,12 +308,13 @@ Deno.serve(async (req) => {
           l.includes('gam3s.gg/') &&
           l !== 'https://gam3s.gg/' &&
           l !== 'https://gam3s.gg/news/' &&
-          !l.includes('#') && !l.includes('?') &&
-          !l.match(/\/(page|category|tag|author|about|newsletter|privacy|terms|contact|sitemap)\//i) &&
-          (l.includes('/news/') || l.includes('/web3-gaming/') || !!l.match(/gam3s\.gg\/[a-z0-9][a-z0-9-]{8,}/i)),
+          !l.includes('#') &&
+          !l.match(/\/(page|category|tag|author|about|newsletter|privacy|terms|contact|sitemap|membership|submit|advertise)\//i) &&
+          !!l.match(/gam3s\.gg\/[a-z0-9][a-z0-9-]{5,}/i),
         name: 'gam3s.gg',
         limit: 20,
-        useSearch: 'site:gam3s.gg/news gaming news',
+        useSearch: 'gam3s.gg news gaming latest',
+        useSearchWithContent: true,
         sourceLang: 'en',
         // No RSS available
       },
