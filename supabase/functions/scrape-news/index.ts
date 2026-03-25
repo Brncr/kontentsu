@@ -206,6 +206,62 @@ async function batchProcess<T, R>(
   return results;
 }
 
+// ── RSS Feed Parser ──────────────────────────────────────────────────────────
+// Priority #1 in link discovery: RSS feeds are free, instant, always fresh.
+async function fetchRssLinks(feedUrl: string, sourceName: string): Promise<Array<{url: string; title?: string; pubDate?: string; description?: string}>> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(feedUrl, {
+      headers: { 'User-Agent': 'Kontentsu/1.0 News Aggregator' },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) {
+      console.warn(`RSS ${sourceName}: HTTP ${res.status} from ${feedUrl}`);
+      return [];
+    }
+    const xml = await res.text();
+    
+    // Parse RSS <item> or Atom <entry> elements
+    const items: Array<{url: string; title?: string; pubDate?: string; description?: string}> = [];
+    
+    // RSS 2.0 format: <item><title>...</title><link>...</link><pubDate>...</pubDate></item>
+    const rssItems = xml.match(/<item[\s>][\s\S]*?<\/item>/gi) || [];
+    for (const item of rssItems) {
+      const link = item.match(/<link[^>]*>([^<]+)<\/link>/i)?.[1]?.trim() ||
+                   item.match(/<link[^>]*href=["']([^"']+)["']/i)?.[1]?.trim();
+      if (!link) continue;
+      const title = item.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i)?.[1]?.trim();
+      const pubDate = item.match(/<pubDate[^>]*>([^<]+)<\/pubDate>/i)?.[1]?.trim() ||
+                      item.match(/<dc:date[^>]*>([^<]+)<\/dc:date>/i)?.[1]?.trim();
+      const desc = item.match(/<description[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/i)?.[1]?.trim();
+      items.push({ url: link, title: title || undefined, pubDate: pubDate || undefined, description: desc?.replace(/<[^>]+>/g, '').slice(0, 300) || undefined });
+    }
+    
+    // Atom format fallback: <entry><title>...</title><link href="..."/><published>...</published></entry>
+    if (items.length === 0) {
+      const atomEntries = xml.match(/<entry[\s>][\s\S]*?<\/entry>/gi) || [];
+      for (const entry of atomEntries) {
+        const link = entry.match(/<link[^>]*href=["']([^"']+)["'][^>]*(?:rel=["']alternate["'])?/i)?.[1]?.trim() ||
+                     entry.match(/<link[^>]*href=["']([^"']+)["']/i)?.[1]?.trim();
+        if (!link) continue;
+        const title = entry.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i)?.[1]?.trim();
+        const pubDate = entry.match(/<published[^>]*>([^<]+)<\/published>/i)?.[1]?.trim() ||
+                        entry.match(/<updated[^>]*>([^<]+)<\/updated>/i)?.[1]?.trim();
+        const desc = entry.match(/<summary[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/summary>/i)?.[1]?.trim();
+        items.push({ url: link, title: title || undefined, pubDate: pubDate || undefined, description: desc?.replace(/<[^>]+>/g, '').slice(0, 300) || undefined });
+      }
+    }
+    
+    console.log(`📡 RSS ${sourceName}: ${items.length} articles from feed`);
+    return items;
+  } catch (e) {
+    console.warn(`RSS ${sourceName} failed:`, e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -241,7 +297,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    type Source = { url: string; filter: (l: string) => boolean; name: string; sort?: (l: string[]) => string[]; limit?: number; mapSearch?: string; useScrapLinks?: boolean; useSearch?: string; useSearchWithContent?: boolean; sourceLang?: string; };
+    type Source = { url: string; filter: (l: string) => boolean; name: string; sort?: (l: string[]) => string[]; limit?: number; mapSearch?: string; useScrapLinks?: boolean; useSearch?: string; useSearchWithContent?: boolean; sourceLang?: string; rssFeed?: string; };
 
     const sources: Source[] = [
       // ─── GAMES ──────────────────────────────────────────────────────────────
@@ -259,6 +315,7 @@ Deno.serve(async (req) => {
         limit: 20,
         useSearch: 'site:gam3s.gg/news gaming news',
         sourceLang: 'en',
+        // No RSS available
       },
       {
         // Voxel/TecMundo: scrape homepage ao vivo para links mais recentes
@@ -279,6 +336,7 @@ Deno.serve(async (req) => {
         name: 'Voxel',
         useScrapLinks: true,
         sourceLang: 'pt',
+        // No Voxel-specific RSS available (TecMundo RSS is general)
       },
       {
         url: 'https://www.terra.com.br/gameon/',
@@ -291,6 +349,7 @@ Deno.serve(async (req) => {
         name: 'Terra GameOn',
         useScrapLinks: true,
         sourceLang: 'pt',
+        // No RSS available
       },
       {
         // Game Informer: bloqueado por firewall, usar Search API
@@ -306,6 +365,7 @@ Deno.serve(async (req) => {
         limit: 20,
         useSearch: 'site:gameinformer.com latest news',
         sourceLang: 'en',
+        // No RSS available
       },
       {
         url: 'https://www.gamevicio.com/noticias/',
@@ -325,6 +385,7 @@ Deno.serve(async (req) => {
         name: 'GameVício',
         useScrapLinks: true,
         sourceLang: 'pt',
+        rssFeed: 'https://www.gamevicio.com/feed/',
       },
       {
         // GameSpot: site JS-heavy, mapa retorna só homepage. Usar Search API.
@@ -340,6 +401,7 @@ Deno.serve(async (req) => {
         limit: 20,
         useSearch: 'site:gamespot.com/articles latest news',
         sourceLang: 'en',
+        rssFeed: 'https://www.gamespot.com/feeds/mashup/',
       },
       {
         // Eurogamer PT: Firecrawl bloqueia scraping direto. Usar Search com scrapeOptions para obter conteúdo inline.
@@ -358,6 +420,7 @@ Deno.serve(async (req) => {
         useSearch: 'site:eurogamer.pt noticias jogos',
         useSearchWithContent: true,
         sourceLang: 'pt',
+        rssFeed: 'https://www.eurogamer.pt/feed',
       },
       {
         // PC Gamer: JS-heavy site, use Firecrawl Search API
@@ -374,6 +437,7 @@ Deno.serve(async (req) => {
         limit: 20,
         useSearch: 'site:pcgamer.com news',
         sourceLang: 'en',
+        rssFeed: 'https://www.pcgamer.com/rss/',
       },
       {
         // Polygon: use Firecrawl Search API for recent gaming news
@@ -393,6 +457,7 @@ Deno.serve(async (req) => {
         limit: 20,
         useSearch: 'site:polygon.com gaming news',
         sourceLang: 'en',
+        // Polygon RSS feed returns connection errors
       },
       {
         // Kotaku: use Firecrawl Search API for recent news
@@ -413,6 +478,7 @@ Deno.serve(async (req) => {
         limit: 20,
         useSearch: 'site:kotaku.com gaming news',
         sourceLang: 'en',
+        rssFeed: 'https://kotaku.com/rss',
       },
       {
         // Rock Paper Shotgun: /news page lists 25+ articles vs ~5 on homepage
@@ -437,6 +503,7 @@ Deno.serve(async (req) => {
         name: 'Rock Paper Shotgun',
         useScrapLinks: true,
         sourceLang: 'en',
+        rssFeed: 'https://www.rockpapershotgun.com/feed',
       },
       {
         // GamesRadar: map retorna só página/paginação. Usar Search API.
@@ -452,6 +519,7 @@ Deno.serve(async (req) => {
         limit: 20,
         useSearch: 'site:gamesradar.com gaming news',
         sourceLang: 'en',
+        rssFeed: 'https://www.gamesradar.com/rss/',
       },
       {
         // Gematsu: map retorna só /browse. Usar Search API.
@@ -475,6 +543,7 @@ Deno.serve(async (req) => {
         limit: 20,
         useSearch: 'site:gematsu.com news',
         sourceLang: 'en',
+        rssFeed: 'https://www.gematsu.com/feed',
       },
 
 
@@ -492,6 +561,7 @@ Deno.serve(async (req) => {
         limit: 20,
         useSearch: 'site:playtoearn.com/news blockchain gaming',
         sourceLang: 'en',
+        // No RSS available
       },
       {
         // CoinDesk PT: site JS-pesado, map retorna só 2 links. Usar Search API.
@@ -506,6 +576,7 @@ Deno.serve(async (req) => {
         limit: 20,
         useSearch: 'site:coindesk.com/pt-br crypto news',
         sourceLang: 'pt',
+        rssFeed: 'https://www.coindesk.com/arc/outboundfeeds/rss/',
       },
       {
         // The Block: /latest has more articles than homepage
@@ -524,6 +595,7 @@ Deno.serve(async (req) => {
         limit: 20,
         useSearch: 'site:theblock.co/post crypto news',
         sourceLang: 'en',
+        // The Block RSS returns 403
       },
       {
         // Decrypt: /news page lists 12+ articles vs price tickers on homepage
@@ -539,6 +611,7 @@ Deno.serve(async (req) => {
         name: 'Decrypt',
         useScrapLinks: true,
         sourceLang: 'en',
+        rssFeed: 'https://decrypt.co/feed',
       },
       {
         // Bitcoin Magazine: /news has chronological article listing
@@ -555,6 +628,7 @@ Deno.serve(async (req) => {
         limit: 20,
         useSearch: 'site:bitcoinmagazine.com news bitcoin',
         sourceLang: 'en',
+        rssFeed: 'https://bitcoinmagazine.com/feed',
       },
       {
         // BeInCrypto BR: /noticias page has full article listing
@@ -569,6 +643,7 @@ Deno.serve(async (req) => {
         name: 'BeInCrypto BR',
         useScrapLinks: true,
         sourceLang: 'pt',
+        // BeInCrypto RSS returns 403
       },
       {
         // CryptoPotato: /news page has full article listing
@@ -584,6 +659,7 @@ Deno.serve(async (req) => {
         limit: 20,
         useSearch: 'site:cryptopotato.com crypto news',
         sourceLang: 'en',
+        rssFeed: 'https://cryptopotato.com/feed/',
       },
 
       // ─── TECH / GAMEDEV ──────────────────────────────────────────────────────
@@ -706,6 +782,19 @@ Deno.serve(async (req) => {
 
           let allLinks: string[] = [];
 
+          // ── Priority #1: RSS Feed (free, instant, always fresh) ──
+          if (source.rssFeed) {
+            const rssItems = await fetchRssLinks(source.rssFeed, source.name);
+            if (rssItems.length >= 3) {
+              allLinks = rssItems.map(r => r.url);
+              console.log(`✅ ${source.name}: RSS provided ${allLinks.length} links (skipping Firecrawl)`);
+            } else {
+              console.log(`⚠️ ${source.name}: RSS returned only ${rssItems.length} items, falling back to Firecrawl`);
+            }
+          }
+
+          // ── Priority #2: Firecrawl APIs (only if RSS didn't provide enough) ──
+          if (allLinks.length < 3) {
           if (source.useSearch) {
             // Use Firecrawl Search API for JS-heavy/blocked sites
             const res = await fetchWithRetry('https://api.firecrawl.dev/v1/search', {
@@ -748,6 +837,7 @@ Deno.serve(async (req) => {
             if (!res.ok) { console.warn(`Map failed for ${source.url}:`, data.error); return []; }
             allLinks = data.links || [];
           }
+          } // end: if (allLinks.length < 3) — Firecrawl fallback
 
           console.log(`${source.name} raw links sample:`, allLinks.slice(0, 5).join(' | '));
           const preFilterCount = allLinks.length;
