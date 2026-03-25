@@ -760,7 +760,7 @@ Deno.serve(async (req) => {
               body: JSON.stringify({
                 query: source.useSearch,
                 limit: source.limit ?? 10,
-                tbs: 'qdr:m',
+                tbs: 'qdr:w',
                 scrapeOptions: { formats: ['markdown'] },
               }),
             }, 3, `search+content:${source.name}`);
@@ -803,7 +803,7 @@ Deno.serve(async (req) => {
               body: JSON.stringify({
                 query: source.useSearch,
                 limit: source.limit ?? 10,
-                tbs: 'qdr:m', // Last month
+                tbs: 'qdr:w', // Last week — keeps results fresh
               }),
             }, 3, `search:${source.name}`);
             const data = await res.json();
